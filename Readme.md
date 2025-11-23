@@ -24,4 +24,5 @@ It is compiled then served thru Flask.
 
 **MarimoWatcher** Sends alerts through telegram when services are down or temperature exceeds 25C for 30 minutes.
 
-
+## Running
+Run with `python3 -m [module name]` from marimo folder eg. `python3 -m test_util.temp_watch`.

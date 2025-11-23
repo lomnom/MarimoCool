@@ -1,5 +1,5 @@
 import time
-import interface as pi
+import shared.interface as pi
 
 print("Starting steady cooling test. CTRL-C to stop.")
 

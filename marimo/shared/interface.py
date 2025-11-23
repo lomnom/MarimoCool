@@ -5,7 +5,7 @@ and exposes methods to read from sensors and control devices.
 
 import RPi.GPIO as GPIO
 import atexit
-import os
+import os, os.path
 import re
 
 ### Global initialisation for all devices & sensors
@@ -98,11 +98,18 @@ class TankTemp(Sensor):
     """Sensor for temperature inside the tank."""
     def __init__(self):
         """Constructor for TankTemp"""
+        self.cached_file = None
         self.setup()
+    
+    def setup(self):
+        """No setup to be done."""
+        pass
     
     # Folder that contains sensor folder, like 28-3ce104574f79
     SYS_SENSOR_DIR = "/sys/bus/w1/devices" 
-    def setup(self):
+    def find_data_file(self) -> str:
+        """Find sensor data file. Data file ends with t=[temp in C * 1000].
+        Returns None if no datafile, else returns path string."""
         sensors = [
             item for item in os.listdir(self.SYS_SENSOR_DIR) 
                 if item.startswith("28")
@@ -110,19 +117,35 @@ class TankTemp(Sensor):
         # If a sensor has family code 28 (ie. folder name like 28-3ce104574f79),
         # it is a DS18B20. This is what we use in the tank.
 
-        assert(len(sensors) == 1) # 0 -> No sensor, >1 -> multiple sensors.
+        # No sensor connected
+        if len(sensors) == 0:
+            return None 
 
-        # Data file ends with t=[temp in C * 1000]
-        self.data_file = f"/sys/bus/w1/devices/{sensors[0]}/w1_slave"
+        sensor = f"/sys/bus/w1/devices/{sensors[0]}/w1_slave"
+        if len(sensors) > 1:
+            print(f"INTERFACE: Multiple temperature sensors detected! Using {sensor}.")
+
+        return sensor
+
+    @property
+    def data_file(self):
+        """Property for the data_file which handles caching."""
+        if (self.cached_file is None) or not (os.path.exists(self.cached_file)):
+            # Update cache if empty or invalid.
+            self.cached_file = self.find_data_file()
+        return self.cached_file
     
-    DATAFILE_RE = re.compile(r"t=([0-9]+)")
-    def read(self) -> float:
-        """Read tank temperature sensor. 
-        Returns float, the temperature in C"""
+    TEMP_RE = re.compile(r"t=([0-9]+)") # Regex for temperature str
+    def read(self) -> "float|None":
+        """Read tank temperature sensor. Returns float, the temperature 
+        in C. Returns None if no temperature sensor."""
+        if not self.data_file:
+            return None
+
         with open(self.data_file, "r") as data_file:
             data = data_file.read()
         
-        result = self.DATAFILE_RE.search(data)
+        result = self.TEMP_RE.search(data)
         return float(result.group(1)) / 1000
 
 ### Exported sensors & devices
