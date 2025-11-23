@@ -71,8 +71,11 @@ def get_json(sock: socket.socket):
 
 class SockServer:
     """This class runs a REST-like server thru sockets."""
-    def __init__(self, port: int):
+    def __init__(self, port: int, external = True):
+        """Set external to False to only be accessible on same machine,
+        True to expose to network."""
         self.port = port
+        self.external = external
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.threads = []
         atexit.register(self.close) # Close self on exit to not hang clients.
@@ -94,21 +97,22 @@ class SockServer:
             send_json(self.conn, data)
 
     def conn_manager(self, conn: "Conn"):
-        """Receive requests for a connection and call handler function to handle."""
+        """Receive requests for a connection and call handler function to handle.
+        Exceptions are sent back as "Internal error {repr(e)}" """
         while True:
             request = conn.get_request()
             if request is None:
                 break # Connection closed
             
             try:
-                response = self.handler_fn(request)
+                response = self.handler_fn(request, conn.addr)
                 conn.send_response(response)
             except Exception as e:
-                conn.send_response(f"Internal error {e}.")
+                conn.send_response(f"Internal error {repr(e)}.")
 
     def handler(self, handler_fn):
         """Decorator to set the handler function. The handler function takes a request
-        body and returns response body."""
+        body and addr as handler_fn(body, addr) and returns response body."""
         self.handler_fn = handler_fn
 
     def run(self):
@@ -116,7 +120,7 @@ class SockServer:
         for each connection."""
         assert(self.handler_fn is not None)
 
-        self.sock.bind(("127.0.0.1", self.port))
+        self.sock.bind(("0.0.0.0" if self.external else "127.0.0.1", self.port))
         self.sock.listen()
 
         while True:
@@ -148,7 +152,11 @@ class SockConn:
     def request(self, body: "Any") -> "Any":
         """Send a request to the server. Returns the response.
         Blocks till response arrives. It is UNSAFE to make multiple
-        requests concurrently!"""
-        send_json(self.sock, body)
+        requests concurrently!
+        Returns None if the connection is closed."""
+        try:
+            send_json(self.sock, body)
+        except BrokenPipeError:
+            return None
 
         return get_json(self.sock)
