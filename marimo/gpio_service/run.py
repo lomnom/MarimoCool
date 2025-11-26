@@ -36,21 +36,11 @@ with open("storage/gpio_service/settings.yaml") as file:
     settings = yaml_load(file)
 PORT = settings["port"]
 CACHE_EXPIRE = settings["cache_expire"]
-DO_LOG = settings["do_log"]
 
 import shared.sock_api as sock_api
 import shared.interface as pi
-
-start = time.perf_counter()
-def log(message):
-    if not DO_LOG:
-        return
-    message = str(message)
-    stamp = time.perf_counter() - start
-    stamp = round(stamp, 2)
-    stamp = str(stamp).ljust(" ", 7)
-    stamp = f"[{stamp}]"
-    print(stamp + message)
+import shared.log as make_log
+log = make_log.make_log("gpio_service")
 
 # What to export
 export = pi.PERIPHERALS
@@ -112,5 +102,5 @@ def handle_req(req_body: "Any", addr: "str") -> "Any":
             else:
                 raise SyntaxError(f"Operation {operation} for device not allowed!")
 
-print(f"Initialised! Listening @ port {PORT}")
+log(f"Initialised! Listening @ port {PORT}")
 server.run()

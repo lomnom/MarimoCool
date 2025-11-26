@@ -1,3 +1,2 @@
 port: 5000
 cache_expire: 1 # Time in seconds before a cached sensor reading expires
-do_log: true # Whether to print console logs

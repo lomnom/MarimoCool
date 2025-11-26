@@ -17,6 +17,7 @@ import socket
 import threading
 import json
 import atexit
+import shared.log as log
 
 # NOTE: All this code currently assumes all packets are well-structured and graceful close will be called.
 # NOTE: All code assumes that the connection will not be closed anywhere between request --> process --> response.
@@ -24,8 +25,6 @@ import atexit
 # NOTE: Malicious actors that are not well-behaved can easily exploit this to DOS.
 # wow thats why ppl just use flask for everything oh my days
 # we still need this for lightewightness.
-
-log = print # Constant, change externally.
 
 class ClosedException(BaseException):
     """Raised to signal a closed connection."""
@@ -90,6 +89,8 @@ def get_json(sock: socket.socket) -> "Any":
     body = json.loads(body)
     return body
 
+SRV_LOG = log.make_log("sock-server") # Logging function for server
+
 class SockServer:
     """This class runs a REST-like server thru sockets."""
     def __init__(self, port: int, external = True):
@@ -125,17 +126,23 @@ class SockServer:
     def conn_manager(self, conn: "Conn"):
         """Receive requests for a connection and call handler function to handle.
         Exceptions are sent back as "Internal error {repr(e)}" """
+        SRV_LOG(f"Connection made with {conn.addr}")
+
         while True:
             try:
                 request = conn.get_request()
             except ClosedException:
                 break
             
+            SRV_LOG(f"Request from {conn.addr}: {request}")
             try:
                 response = self.handler_fn(request, conn.addr)
                 conn.send_response(response)
             except Exception as e:
+                SRV_LOG(f"Internal error on request {conn.addr}: {request}, {repr(e)}")
                 conn.send_response(f"Internal error {repr(e)}.")
+            
+        SRV_LOG(f"Connection with {conn.addr} ended")
 
     def handler(self, handler_fn):
         """Decorator to set the handler function. The handler function takes a request
@@ -148,8 +155,11 @@ class SockServer:
         assert(self.handler_fn is not None)
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.bind(("0.0.0.0" if self.external else "127.0.0.1", self.port))
+        addr = "0.0.0.0" if self.external else "127.0.0.1"
+        self.sock.bind((addr, self.port))
         self.sock.listen()
+
+        SRV_LOG(f"Server now running at {addr}:{self.port}")
 
         while True:
             conn, addr = self.sock.accept()
@@ -171,6 +181,9 @@ class SockServer:
         for thread, conn in self.threads:
             conn.close() # Close client connection, which also closes thread.
             thread.join()
+        SRV_LOG("Server closed")
+
+CLI_LOG = log.make_log("sock-client") # Logging function for client
 
 class SockConn:
     """This class allows interfacing with a SockServer."""
@@ -179,6 +192,7 @@ class SockConn:
         self.port = port
         self.conn = None
         self.req_lock = threading.Lock() # Enforce synchronous requesting.
+        atexit.register(self.close) # Close current conn on exit to not hang server.
     
     def request(self, body: "Any") -> "Any":
         """Make a request to the server. Raises ClosedException if server unavailable.
@@ -196,16 +210,24 @@ class SockConn:
             except ClosedException:
                 # Signals that we need to reconnect.
                 # Either conn closed or we have no cached connection.
+                CLI_LOG(f"Reconnecting to {self.addr}:{self.port}")
                 self.conn = None
 
                 try:
                     self.conn = self.Conn(self.addr, self.port)
                 except:
+                    CLI_LOG(f"Connection to {self.addr}:{self.port} failed.")
                     raise ClosedException() # Reconnection failed.
 
                 # Basically guaranteed to not throw ClosedException if conn forms.
                 retry = self.conn.request(body)
                 return retry
+        
+    def close():
+        """Closes current connection to server"""
+        if self.conn is not None:
+            self.conn.close()
+            CLI_LOG(f"Connection to {self.addr}:{self.port} closed.")
 
     class Conn:
         """This class represents a connection to a SockServer"""
@@ -214,7 +236,6 @@ class SockConn:
             Propagates exceptions if connection fails."""
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.sock.connect((addr, port))
-            atexit.register(self.close) # Close self on exit to not hang server.
 
         def close(self):
             """Close connection to server"""
