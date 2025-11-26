@@ -223,7 +223,7 @@ class SockConn:
                 retry = self.conn.request(body)
                 return retry
         
-    def close():
+    def close(self):
         """Closes current connection to server"""
         if self.conn is not None:
             self.conn.close()

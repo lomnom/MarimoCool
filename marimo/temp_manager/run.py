@@ -13,7 +13,7 @@ from dataclasses import dataclass, asdict
 from enum import Enum
 
 import shared.log as make_log
-log = make_log("temp-manager")
+log = make_log.make_log("temp-manager")
 import shared.sock_api as sock_api
 
 from yaml import safe_load as yaml_load
@@ -119,8 +119,10 @@ class TempManager:
         peltier_on = self.gpio_req({"name": "peltier", "operation": "is_on"})
         if peltier_on and self.state.phase == Phase.idle:
             self.gpio_req({"name": "peltier", "operation": "turn_off"})
+            log("Turning peltier on")
         elif not peltier_on and self.state.phase == Phase.cool:
             self.gpio_req({"name": "peltier", "operation": "turn_on"})
+            log("Turning peltier off")
         
     def fan_tick(self):
         """Runs the fan control section of a tick. 

@@ -63,8 +63,6 @@ server = sock_api.SockServer(PORT)
 @server.handler
 def handle_req(req_body: "Any", addr: "str") -> "Any":
     """Handle a request to GPIOService."""
-    print(f"Request from {addr}: {req_body}")
-
     try:
         name = req_body["name"]
         operation = req_body["operation"]
