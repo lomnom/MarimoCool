@@ -18,38 +18,61 @@ import threading
 import json
 import atexit
 
-def read_bytes(sock: socket.socket, length: int):
+# NOTE: All this code currently assumes all packets are well-structured and graceful close will be called.
+# NOTE: All code assumes that the connection will not be closed anywhere between request --> process --> response.
+# NOTE: Assumes json packets have valid json.
+# NOTE: Malicious actors that are not well-behaved can easily exploit this to DOS.
+# wow thats why ppl just use flask for everything oh my days
+# we still need this for lightewightness.
+
+log = print # Constant, change externally.
+
+class ClosedException(BaseException):
+    """Raised to signal a closed connection."""
+    def __init__(self, message = ""):
+        self.message = message
+        super().__init__(self.message)
+
+def read_bytes(sock: socket.socket, length: int) -> bytes:
     """Read bytes from a socket. Normal .recv is not guaranteed to return all
-    bytes. Returns None if connection closed."""
+    bytes. Raises ClosedException if connection closed."""
     data = bytes()
     while len(data) < length:
-        new = sock.recv(length - len(data))
+        try:
+            new = sock.recv(length - len(data))
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            raise ClosedException() # Other close methods
+
         if not new:
-            return None
+            raise ClosedException() # Client closed gracefully
+
         data += new
     return data
 
-def read_packet(sock: socket.socket) -> "bytes|None":
-    """Read a packet from the tcp stream. Returns None if the stream has closed.
+def read_packet(sock: socket.socket) -> bytes:
+    """Read a packet from the tcp stream. Raises ClosedException
+    if the stream has closed.
 
     Packet structure:
     -> [3 bytes, big endian: packet size in bytes][Json data]
     
     3 bytes are used to enforce a packet size limit of ~16mb"""
-    length_bytes = read_bytes(sock, 3)
-    if not length_bytes:
-        return None
+    length_bytes = read_bytes(sock, 3) # throws ClosedException if closed
 
     length = int.from_bytes(length_bytes, "big")
 
     return read_bytes(sock, length)
 
 def send_packet(sock: socket.socket, data: bytes):
-    """Send a packet to TCP stream."""
+    """Send a packet to TCP stream. Raises ClosedException
+    if connection closed."""
 
     length_bytes = len(data).to_bytes(3, "big")
     body = length_bytes + data
-    sock.sendall(body)
+    try:
+        sock.sendall(body)
+    except (BrokenPipeError, ConnectionResetError, OSError):
+        raise ClosedException()
 
 def send_json(sock: socket.socket, body: "Any"):
     """Send a python object serialised to json then bytes thru
@@ -58,12 +81,10 @@ def send_json(sock: socket.socket, body: "Any"):
     body = body.encode("utf-8")
     send_packet(sock, body)
 
-def get_json(sock: socket.socket):
+def get_json(sock: socket.socket) -> "Any":
     """Receive and decode json sent as bytes in TCP stream.
-    Returns None if connection is closed already."""
-    body = read_packet(sock)
-    if body is None:
-        return None
+    Raises ClosedException if connection is closed already."""
+    body = read_packet(sock) # raises ClosedException if closed
     
     body = body.decode("utf-8")
     body = json.loads(body)
@@ -76,7 +97,7 @@ class SockServer:
         True to expose to network."""
         self.port = port
         self.external = external
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock = None
         self.threads = []
         atexit.register(self.close) # Close self on exit to not hang clients.
     
@@ -87,22 +108,28 @@ class SockServer:
             self.conn = conn
             self.addr = addr
         
+        def close(self):
+            """Close the connection to client."""
+            self.conn.close()
+        
         def get_request(self) -> "Any":
-            """Gets a request from the client. Returns None if connection
+            """Gets a request from the client. Raises ClosedException if connection
             closed."""
             return get_json(self.conn)
 
         def send_response(self, data: "Any"):
-            """Send a response back to the clien"""
+            """Send a response back to the client. Raises ClosedException if conn
+            closed."""
             send_json(self.conn, data)
 
     def conn_manager(self, conn: "Conn"):
         """Receive requests for a connection and call handler function to handle.
         Exceptions are sent back as "Internal error {repr(e)}" """
         while True:
-            request = conn.get_request()
-            if request is None:
-                break # Connection closed
+            try:
+                request = conn.get_request()
+            except ClosedException:
+                break
             
             try:
                 response = self.handler_fn(request, conn.addr)
@@ -120,6 +147,7 @@ class SockServer:
         for each connection."""
         assert(self.handler_fn is not None)
 
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.bind(("0.0.0.0" if self.external else "127.0.0.1", self.port))
         self.sock.listen()
 
@@ -132,31 +160,71 @@ class SockServer:
                 daemon = True # daemon means it is killed automatically when main exits.
             )
             handler_thread.start()
+            self.threads.append((
+                handler_thread,
+                conn
+            ))
     
     def close(self):
-        """Close socket."""
-        self.sock.close() 
+        """Close socket. Used for cleanup on termination."""
+        self.sock.close() # Stop listening
+        for thread, conn in self.threads:
+            conn.close() # Close client connection, which also closes thread.
+            thread.join()
 
 class SockConn:
-    """This class allows connection to a server with SockServer."""
+    """This class allows interfacing with a SockServer."""
     def __init__(self, addr: str, port: int):
-        """Takes in ipv4 address & port, connects to server"""
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.connect((addr, port))
-        atexit.register(self.close) # Close self on exit to not hang server.
-
-    def close(self):
-        """Close connection to server"""
-        self.sock.close()
-
+        self.addr = addr
+        self.port = port
+        self.conn = None
+        self.req_lock = threading.Lock() # Enforce synchronous requesting.
+    
     def request(self, body: "Any") -> "Any":
-        """Send a request to the server. Returns the response.
-        Blocks till response arrives. It is UNSAFE to make multiple
-        requests concurrently!
-        Returns None if the connection is closed."""
-        try:
-            send_json(self.sock, body)
-        except BrokenPipeError:
-            return None
+        """Make a request to the server. Raises ClosedException if server unavailable.
+        unreachable."""
+        with self.req_lock:
+            try:
+                # We basically reuse a cached connection, and try to reconnect if it is invalid.
+                if self.conn is None:
+                    # No cached connection
+                    raise ClosedException()
+                else:
+                    # Raises ClosedException if conn closed.
+                    response = self.conn.request(body)
+                    return response
+            except ClosedException:
+                # Signals that we need to reconnect.
+                # Either conn closed or we have no cached connection.
+                self.conn = None
 
-        return get_json(self.sock)
+                try:
+                    self.conn = self.Conn(self.addr, self.port)
+                except:
+                    raise ClosedException() # Reconnection failed.
+
+                # Basically guaranteed to not throw ClosedException if conn forms.
+                retry = self.conn.request(body)
+                return retry
+
+    class Conn:
+        """This class represents a connection to a SockServer"""
+        def __init__(self, addr: str, port: int):
+            """Takes in ipv4 address & port, connects to server.
+            Propagates exceptions if connection fails."""
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.sock.connect((addr, port))
+            atexit.register(self.close) # Close self on exit to not hang server.
+
+        def close(self):
+            """Close connection to server"""
+            self.sock.close()
+
+        def request(self, body: "Any") -> "Any":
+            """Send a request to the server. Returns the response.
+            Blocks till response arrives. It is UNSAFE to make multiple
+            requests concurrently!
+            Raises ClosedException if the connection is closed."""
+            
+            send_json(self.sock, body)
+            return get_json(self.sock)

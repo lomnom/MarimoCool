@@ -68,6 +68,9 @@ Thermal paste application tutorial: [link](https://www.youtube.com/watch?v=Sog0M
 ## Sublime sftp
 Getting package manager working: [link](https://github.com/wbond/package_control/issues/1612#issuecomment-1708802315)
 
+## FastAPI installation
+Run `pip3 install "fastapi[standard]"` as per [docs](https://fastapi.tiangolo.com/#requirements).
+
 ## Todo
 1. Avoid dew point
 2. Turn on fan only when needed

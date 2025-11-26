@@ -1,0 +1,4 @@
+port: 5001 # Where to run update interface
+gpio_addr: 
+  port: 5000 # Where GPIOService is running
+  addr: "0.0.0.0"

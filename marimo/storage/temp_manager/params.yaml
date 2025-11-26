@@ -1,0 +1,7 @@
+# This is loaded on startup of temp_manager
+# Change the params thru the API when temp_manager is running.
+# API updates will also update this file
+disabled: false
+low: 21
+high: 21.5
+fan_retain: 90
