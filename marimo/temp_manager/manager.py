@@ -3,8 +3,17 @@ Run this file to run temp_manager. The temp_manager service is
 responsible for controlling fan & peltier to regulate tank temperature
 within a specific temperature range.
 
-Access to peripherals is done thru gpio_service. Any change to configuration
-is propagated through a sock_api to keep the service lightweight.
+Access to peripherals is done thru gpio_service. This file is kept simple for
+reliability.
+
+The following log messages are guaranteed:
+- "Running tick..." when a tick is started
+- Within a single tick, in this order:
+    - "Peltier tick failed with [...]" If an exception occurs during peltier tick
+    - "Fan tick failed with [...]" if an exception occurs during fan tick.
+    - "State after tick: [...]" printed after every tick to show state.
+    - "Using params [...]" on startup to show what parameters are used.
+    - "Tick done." after the tick is done
 """
 import time
 import threading
@@ -17,23 +26,16 @@ log = make_log.make_log("temp-manager")
 import shared.sock_api as sock_api
 
 from yaml import safe_load as yaml_load
-from yaml import dump as yaml_dump
 with open("storage/temp_manager/settings.yaml") as file:
     settings = yaml_load(file)
 GPIO_PORT = settings["gpio_addr"]["port"]
 GPIO_ADDR = settings["gpio_addr"]["addr"]
 
-PARAMS_FILE = "storage/temp_manager/params.yaml"
+from sys import argv
+# Run this program as python3 -m temp_manager.core_run [low] [high] [fan_retain] [tick_time]
+# Where all square brackets are floats.
 
 ## Utils to manage params
-"""
-The params file is to save the params of the manager so that it can
-be restored on the next start.
-
-The params in the manager are not to be touched. The service should
-be stopped before the params are updated, both internal and file.
-"""
-
 @dataclass
 class Params:
     """Dataclass, represents the current parameters of the cooler."""
@@ -41,26 +43,6 @@ class Params:
     high: float
     fan_retain: float
     tick_time: float
-
-def read_params_file() -> Params:
-    """Read the params file to a params object."""
-    with open(PARAMS_FILE) as file:
-        new_params = yaml_load(file)
-    return Params(
-        **new_params
-    )
-
-PARAMS_HEADER = """# This is loaded on startup of temp_manager
-# Change the params thru the API when temp_manager is running.
-# API updates will also update this file
-"""
-
-def write_params_file(new_params: Params):
-    """Write params to the params file."""
-    data = asdict(new_params)
-    written = PARAMS_HEADER + yaml_dump(data)
-    with open(PARAMS_FILE, 'w') as file:
-        file.write(written)
 
 ## Actual manager
 Phase = Enum('Phase', [('cool', 1), ('idle', 2)])
@@ -91,11 +73,14 @@ class TempManager:
         self, 
         params: Params, 
         server_conn: sock_api.SockConn,
-        state: State = State(phase = Phase.cool, last_peltier_on = 0)
+        state: State = None
     ):
         """server_conn is a SockConn to the GPIOService."""
         self.params = params
-        self.state = state
+        if state is not None:
+            self.state = state
+        else:
+            self.state = State(phase = Phase.cool, last_peltier_on = 0)
         self.server_conn = server_conn
         self.stop_lock = threading.Lock()
     
@@ -165,20 +150,23 @@ class TempManager:
         try:
             self.fan_tick()
             fan_fail = None
-            log(f"Fan tick failed with {repr(e)}")
         except Exception as e:
+            log(f"Fan tick failed with {repr(e)}")
             fan_fail = e
         
         return (peltier_fail, fan_fail)
     
     def run(self):
         """Run the service. Stop with .stop().
-        Never ever change params when running."""
+        Never ever change params when running.
+        Only ONE run instance can exist at any time."""
         log(f"Cooling service started. Params={self.params}")
         while True:
             start = time.perf_counter()
+            log(f"Running tick...") 
             result = self.tick()
-            # TODO: Log tick result.
+            log(f"State after tick: {self.state}") 
+            log(f"Tick done.") 
             elapsed = time.perf_counter() - start
             to_wait = self.params.tick_time - elapsed
             if to_wait > 0:
@@ -188,7 +176,7 @@ class TempManager:
             if self.stop_lock.locked():
                 self.stop_lock.release() # Return the signal
                 break
-        log("Cooling service ended.")
+        log("Tick loop ended.")
     
     def stop(self):
         """Stop the service gracefully.
@@ -199,8 +187,17 @@ class TempManager:
 
 def get_manager():
     """Get a manager object initialised with saved params and GPIOService"""
+    _, low, high, fan_retain, tick_time = argv
+
     return TempManager(
-        read_params_file(),
+        Params(
+            low = float(low),
+            high = float(high),
+            fan_retain = float(fan_retain),
+            tick_time = float(tick_time),
+        ),
         sock_api.SockConn(GPIO_ADDR, GPIO_PORT)
     )
 
+manager = get_manager()
+log(f"Using params {manager.params}") 
