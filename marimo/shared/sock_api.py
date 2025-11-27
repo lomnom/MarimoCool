@@ -26,7 +26,7 @@ import shared.log as log
 # wow thats why ppl just use flask for everything oh my days
 # we still need this for lightewightness.
 
-class ClosedException(BaseException):
+class ClosedException(Exception):
     """Raised to signal a closed connection."""
     def __init__(self, message = ""):
         self.message = message

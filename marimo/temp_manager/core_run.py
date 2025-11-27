@@ -7,12 +7,12 @@ Access to peripherals is done thru gpio_service. This file is kept simple for
 reliability.
 
 The following log messages are guaranteed:
-- "Running tick..." when a tick is started
+- "Cooling service started. Params=[...]" on startup to show what parameters are used.
 - Within a single tick, in this order:
+    - "Running tick..." when a tick is started
     - "Peltier tick failed with [...]" If an exception occurs during peltier tick
     - "Fan tick failed with [...]" if an exception occurs during fan tick.
     - "State after tick: [...]" printed after every tick to show state.
-    - "Using params [...]" on startup to show what parameters are used.
     - "Tick done." after the tick is done
 """
 import time
@@ -68,19 +68,16 @@ class TempManager:
 
     The fan stays on for fan_retain seconds after the peltier is switched off.
 
-    tick_time is the time between the start of each tick to aim for."""
+    tick_time is the time between the start of each tick to aim for.
+    """
     def __init__(
         self, 
         params: Params, 
-        server_conn: sock_api.SockConn,
-        state: State = None
+        server_conn: sock_api.SockConn
     ):
         """server_conn is a SockConn to the GPIOService."""
         self.params = params
-        if state is not None:
-            self.state = state
-        else:
-            self.state = State(phase = Phase.cool, last_peltier_on = 0)
+        self.state = None
         self.server_conn = server_conn
         self.stop_lock = threading.Lock()
     
@@ -156,16 +153,22 @@ class TempManager:
         
         return (peltier_fail, fan_fail)
     
+    initial_state = State(phase = Phase.cool, last_peltier_on = 0)
     def run(self):
         """Run the service. Stop with .stop().
-        Never ever change params when running.
-        Only ONE run instance can exist at any time."""
-        log(f"Cooling service started. Params={self.params}")
+        Never ever change params when running."""
+        if self.is_running():
+            # Only ONE run instance can exist at any time.
+            raise RuntimeError("An instance of manager is running already!")
+
+        log(f"Cooling service started. Params={asdict(self.params)}")
+        self.state = State(**asdict(self.initial_state))
+
         while True:
             start = time.perf_counter()
             log(f"Running tick...") 
             result = self.tick()
-            log(f"State after tick: {self.state}") 
+            log(f"State after tick: {asdict(self.state)}") 
             log(f"Tick done.") 
             elapsed = time.perf_counter() - start
             to_wait = self.params.tick_time - elapsed
@@ -176,28 +179,76 @@ class TempManager:
             if self.stop_lock.locked():
                 self.stop_lock.release() # Return the signal
                 break
+        
+        self.state = None
         log("Tick loop ended.")
     
+    def is_running(self) -> bool:
+        """Returns True if the service is running now else False."""
+        return self.state is not None
+
     def stop(self):
         """Stop the service gracefully.
-        TODO: Make sure run is actually running when this is called else deadlock occurs"""
-        self.stop_lock.acquire() # Signal
-        self.stop_lock.acquire() # Wait for returned signal
-        log("Cooling service ended")
+        If it is not running, has no effect.
+        Pls understand that the double-acquire mechanism works, and
+        allows for back-signalling.
+        """
+        if not self.is_running():
+            self.stop_lock.acquire() # Signal
+            self.stop_lock.acquire() # Wait for returned signal
+            log("Cooling service ended")
+
+def get_params() -> Params:
+    """Get params from keyword arguments.
+    Does validation."""
+    if len(argv) != 5:
+        raise ValueError(
+            "4 arguments expected! Run as "
+            "python3 -m temp_manager.core_run [low] [high] [fan_retain] [tick_time]"
+        )
+    _, low, high, fan_retain, tick_time = argv
+
+    try:
+        low = float(low)
+        high = float(high)
+        fan_retain = float(fan_retain)
+        tick_time = float(tick_time)
+    except ValueError:
+        raise ValueError("Provided arguments must be numerical values!")
+    
+    def ensure(val: bool):
+        """Like assert but cannot be disabled."""
+        if not val: 
+            raise AssertionError("Assertion failed.")
+    
+    ensure(high > low)
+    ensure(fan_retain >= 0)
+    ensure(1 <= tick_time <= 60) # High tick time makes system unresponsive.
+
+    return Params(
+        low = low, high = high, 
+        fan_retain = fan_retain, tick_time = tick_time
+    )
 
 def get_manager():
     """Get a manager object initialised with saved params and GPIOService"""
-    _, low, high, fan_retain, tick_time = argv
-
     return TempManager(
-        Params(
-            low = float(low),
-            high = float(high),
-            fan_retain = float(fan_retain),
-            tick_time = float(tick_time),
-        ),
+        get_params(),
         sock_api.SockConn(GPIO_ADDR, GPIO_PORT)
     )
 
 manager = get_manager()
 log(f"Using params {manager.params}") 
+
+thread = threading.Thread(
+    target = manager.run
+)
+thread.start()
+
+try:
+    thread.join()
+except KeyboardInterrupt:
+    log("Ending...")
+    manager.stop()
+    thread.join()
+    log("Ended.")
