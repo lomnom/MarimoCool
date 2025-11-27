@@ -1,19 +1,28 @@
 """
-Run this file to run temp_manager. The temp_manager service is 
-responsible for controlling fan & peltier to regulate tank temperature
-within a specific temperature range.
+This file defines the core temperature regulation program. It is minimal
+for reliability.
 
-Access to peripherals is done thru gpio_service. This file is kept simple for
-reliability.
+The temp_manager service is responsible for controlling fan & peltier to
+regulate tank temperature within a specific temperature range.
 
-The following log messages are guaranteed:
-- "Cooling service started. Params=[...]" on startup to show what parameters are used.
+Messages to stderr are sent, where each output is prefixed by
+5 digits, the number of bytes of UTF-8 it is, like so:
+00004Nya
+00012hello world![EOF]
+
+The brackets <> are included in these outputs.
+- "params; <dict>" is sent on startup to show what parameters are used.
 - Within a single tick, in this order:
-    - "Running tick..." when a tick is started
-    - "Peltier tick failed with [...]" If an exception occurs during peltier tick
-    - "Fan tick failed with [...]" if an exception occurs during fan tick.
-    - "State after tick: [...]" printed after every tick to show state.
-    - "Tick done." after the tick is done
+    - "running" when a tick is started
+    - "peltier_fail; <err>" If an exception occurs during peltier tick
+    - "fan_fail; <err>" if an exception occurs during fan tick.
+    - "state; <state>" printed after every tick to show state.
+    - "done" after the tick is done
+
+Run this program as python3 -m temp_manager.core_run [low] [high] [fan_retain] [tick_time]
+Where all square brackets are floats.
+
+2> /dev/null to silence the stderr output.
 """
 import time
 import threading
@@ -31,9 +40,22 @@ with open("storage/temp_manager/settings.yaml") as file:
 GPIO_PORT = settings["gpio_addr"]["port"]
 GPIO_ADDR = settings["gpio_addr"]["addr"]
 
-from sys import argv
-# Run this program as python3 -m temp_manager.core_run [low] [high] [fan_retain] [tick_time]
-# Where all square brackets are floats.
+from sys import argv, stderr
+def out_pipe(output: str):
+    """Print output to stderr in standard format."""
+    if type(output) is not str:
+        raise TypeError("Must supply string to out_pipe!")
+
+    output = output.encode("utf-8")
+
+    length = len(output)
+    if length > 99999:
+        raise ValueError("Message must not exceed 99999 bytes! (what are u sending bruh)")
+    length = str(length).zfill(5)
+    length = length.encode("ascii")
+
+    stderr.buffer.write(length + output)
+    stderr.buffer.flush()
 
 ## Utils to manage params
 @dataclass
@@ -45,7 +67,10 @@ class Params:
     tick_time: float
 
 ## Actual manager
-Phase = Enum('Phase', [('cool', 1), ('idle', 2)])
+class Phase(Enum):
+    cool = 1
+    idle = 2
+
 @dataclass
 class State:
     """Contains the whole state of TempManager"""
@@ -142,6 +167,7 @@ class TempManager:
             peltier_fail = None
         except Exception as e:
             log(f"Peltier tick failed with {repr(e)}")
+            out_pipe(f"peltier_fail; <{repr(e)}>")
             peltier_fail = e
         
         try:
@@ -149,6 +175,7 @@ class TempManager:
             fan_fail = None
         except Exception as e:
             log(f"Fan tick failed with {repr(e)}")
+            out_pipe(f"fan_fail; <{repr(e)}>")
             fan_fail = e
         
         return (peltier_fail, fan_fail)
@@ -161,15 +188,19 @@ class TempManager:
             # Only ONE run instance can exist at any time.
             raise RuntimeError("An instance of manager is running already!")
 
-        log(f"Cooling service started. Params={asdict(self.params)}")
+        log(f"Cooling service started. Params={self.params}")
+        out_pipe(f"params; <{self.params}>")
         self.state = State(**asdict(self.initial_state))
 
         while True:
             start = time.perf_counter()
-            log(f"Running tick...") 
+            out_pipe("running")
+
             result = self.tick()
-            log(f"State after tick: {asdict(self.state)}") 
-            log(f"Tick done.") 
+
+            out_pipe(f"state; {self.state}")
+            out_pipe(f"done")
+
             elapsed = time.perf_counter() - start
             to_wait = self.params.tick_time - elapsed
             if to_wait > 0:
@@ -193,7 +224,7 @@ class TempManager:
         Pls understand that the double-acquire mechanism works, and
         allows for back-signalling.
         """
-        if not self.is_running():
+        if self.is_running():
             self.stop_lock.acquire() # Signal
             self.stop_lock.acquire() # Wait for returned signal
             log("Cooling service ended")

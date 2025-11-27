@@ -11,7 +11,7 @@ There are multiple reasons for the modular architecture:
 ### Components
 **GPIOService** is a lower level service which manages reads and writes to peripherals connected to the pi. Individual applications do not all interface on their own as multiple applications controlling the GPIO concurrently is unsafe. Uses sockets to set up a low-level TCP API similar to a REST api but with less overhead, as it will receive very frequent pings.
 
-**TempManager** is a service which interfaces with GPIOService to regulate temperature. It is the core functionality of the marimo tank. Receives updates through the same sockets API.
+**TempManager** is a service which interfaces with GPIOService to regulate temperature. It is the core functionality of the marimo tank. A lower-level core_run program contains the loop itself, and high_run exposes the API which manages it.
 
 **LogService** Stores temperature and peltier & fan on/off logs thru GPIOService, can be queried to retrieve logs thru flask.
 
