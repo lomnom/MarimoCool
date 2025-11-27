@@ -188,7 +188,6 @@ CLI_LOG = log.make_log("sock-client") # Logging function for client
 class SockConn:
     """This class allows interfacing with a SockServer."""
     def __init__(self, addr: str, port: int):
-        """Connection is not opened on initialisation. Only on first request."""
         self.addr = addr
         self.port = port
         self.conn = None

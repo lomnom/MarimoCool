@@ -1,13 +1,10 @@
 """
-This file defines the core temperature regulation loop of temp_manager.
+Run this file to run temp_manager. The temp_manager service is 
+responsible for controlling fan & peltier to regulate tank temperature
+within a specific temperature range.
 
-The temp_manager service is responsible for controlling fan & peltier
-to regulate tank temperature within a specific temperature range.
-
-Access to peripherals is done thru gpio_service. 
-
-Any change to configuration is propagated through a sock_api (defined in run.py).
-TempManager can be run through the interface defined in interface.py
+Access to peripherals is done thru gpio_service. Any change to configuration
+is propagated through a sock_api to keep the service lightweight.
 """
 import time
 import threading
@@ -19,6 +16,24 @@ import shared.log as make_log
 log = make_log.make_log("temp-manager")
 import shared.sock_api as sock_api
 
+from yaml import safe_load as yaml_load
+from yaml import dump as yaml_dump
+with open("storage/temp_manager/settings.yaml") as file:
+    settings = yaml_load(file)
+GPIO_PORT = settings["gpio_addr"]["port"]
+GPIO_ADDR = settings["gpio_addr"]["addr"]
+
+PARAMS_FILE = "storage/temp_manager/params.yaml"
+
+## Utils to manage params
+"""
+The params file is to save the params of the manager so that it can
+be restored on the next start.
+
+The params in the manager are not to be touched. The service should
+be stopped before the params are updated, both internal and file.
+"""
+
 @dataclass
 class Params:
     """Dataclass, represents the current parameters of the cooler."""
@@ -27,6 +42,27 @@ class Params:
     fan_retain: float
     tick_time: float
 
+def read_params_file() -> Params:
+    """Read the params file to a params object."""
+    with open(PARAMS_FILE) as file:
+        new_params = yaml_load(file)
+    return Params(
+        **new_params
+    )
+
+PARAMS_HEADER = """# This is loaded on startup of temp_manager
+# Change the params thru the API when temp_manager is running.
+# API updates will also update this file
+"""
+
+def write_params_file(new_params: Params):
+    """Write params to the params file."""
+    data = asdict(new_params)
+    written = PARAMS_HEADER + yaml_dump(data)
+    with open(PARAMS_FILE, 'w') as file:
+        file.write(written)
+
+## Actual manager
 Phase = Enum('Phase', [('cool', 1), ('idle', 2)])
 @dataclass
 class State:
@@ -46,44 +82,23 @@ class TempManager:
     - If the temperature < low, change to "idle".
     -> When idle:
     - Peltier is off.
-    - If the temperature >= high, change to "cool"
+    - If the temperature >= high, change to "cooling"
 
     The fan stays on for fan_retain seconds after the peltier is switched off.
 
-    tick_time is the time between the start of each tick to aim for.
-    
-    State starts at TempManager.initial_state when .run() is called. It is
-    None when not running.
-
-    Public functions:
-    - constructor
-    - run
-    - is_running
-    - stop
-    - copy_state
-    - copy_params
-    - update_params
-
-    Public attributes:
-    - [none.]
-
-    Use only allowed public functions & attributes for safety.
-    """
-
+    tick_time is the time between the start of each tick to aim for."""
     def __init__(
         self, 
         params: Params, 
         server_conn: sock_api.SockConn,
+        state: State = State(phase = Phase.cool, last_peltier_on = 0)
     ):
         """server_conn is a SockConn to the GPIOService."""
         self.params = params
+        self.state = state
         self.server_conn = server_conn
-
-        self.state = None
-        self.tick_lock = threading.Lock() # Locked when a tick is happening.
-        self.stop_lock = threading.Lock() # Used for stop signalling.
+        self.stop_lock = threading.Lock()
     
-    ## Tick behavior
     def gpio_req(self, body: "Any") -> "Any":
         """Makes a request to GPIOService. Raises RuntimeError
         if internal error faced in GPIOService. Raises sock_api.ClosedException
@@ -140,84 +155,52 @@ class TempManager:
         """Runs a full cooling tick. Returns a tuple 
         (peltier_tick exception | None, fan_tick exception | None)
         """
-        with self.tick_lock:
-            try:
-                self.peltier_tick()
-                peltier_fail = None
-            except Exception as e:
-                log(f"Peltier tick failed with {repr(e)}")
-                peltier_fail = e
-            
-            try:
-                self.fan_tick()
-                fan_fail = None
-            except Exception as e:
-                log(f"Fan tick failed with {repr(e)}")
-                fan_fail = e
+        try:
+            self.peltier_tick()
+            peltier_fail = None
+        except Exception as e:
+            log(f"Peltier tick failed with {repr(e)}")
+            peltier_fail = e
+        
+        try:
+            self.fan_tick()
+            fan_fail = None
+            log(f"Fan tick failed with {repr(e)}")
+        except Exception as e:
+            fan_fail = e
         
         return (peltier_fail, fan_fail)
     
-    ## Start/stop behavior
-    initial_state = State(phase = Phase.cool, last_peltier_on = 0)
     def run(self):
         """Run the service. Stop with .stop().
         Never ever change params when running."""
         log(f"Cooling service started. Params={self.params}")
-
-        self.state = State(**asdict(self.initial_state)) # Make a copy.
-        log(f"Initial state is {self.state}")
-
         while True:
             start = time.perf_counter()
-            self.tick()
+            result = self.tick()
+            # TODO: Log tick result.
             elapsed = time.perf_counter() - start
             to_wait = self.params.tick_time - elapsed
             if to_wait > 0:
                 time.sleep(to_wait)
 
-            # NOTE: extremely long tick time will freeze system.
+            # TODO: extremely long tick time will freeze system.
             if self.stop_lock.locked():
                 self.stop_lock.release() # Return the signal
                 break
-        
-        self.state = None
-        log("Runner exiting")
-    
-    def is_running(self) -> bool:
-        """Returns true if currently running, false otherwise.
-        """
-        return self.state is not None # state is None when not running.
+        log("Cooling service ended.")
     
     def stop(self):
         """Stop the service gracefully.
-        Does nothing if not running."""
-        if self.is_running():
-            self.stop_lock.acquire() # Signal
-            self.stop_lock.acquire() # Wait for returned signal
-            log("Cooling service ended.")
+        TODO: Make sure run is actually running when this is called else deadlock occurs"""
+        self.stop_lock.acquire() # Signal
+        self.stop_lock.acquire() # Wait for returned signal
+        log("Cooling service ended")
 
-    ## Safe public interfaces.
-    def copy_state(self) -> State|None:
-        """
-        Returns a copy of the current state of the system.
-        Returns None if not running.
-        """
-        with self.tick_lock:
-            if self.state is None:
-                return None
-            else:
-                return State(**asdict(self.state))
-    
-    def copy_params(self) -> Params:
-        """Returns the a copy of the current params of the system."""
-        return Params(**asdict(self.params))
-    
-    def update_params(self, params: Params):
-        """Update the params of the system. 
-        Can only be done when system is stopped. Raises RuntimeError
-        if system is running when this is called.
-        """
-        if self.is_running():
-            raise RuntimeError("Cannot update state when TempManager is running!")
-        
-        self.params = Params(**asdict(params)) # Create a copy.
+def get_manager():
+    """Get a manager object initialised with saved params and GPIOService"""
+    return TempManager(
+        read_params_file(),
+        sock_api.SockConn(GPIO_ADDR, GPIO_PORT)
+    )
+
