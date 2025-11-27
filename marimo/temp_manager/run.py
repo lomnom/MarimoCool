@@ -20,13 +20,20 @@ from yaml import safe_load as yaml_load
 from yaml import dump as yaml_dump
 with open("storage/temp_manager/settings.yaml") as file:
     settings = yaml_load(file)
-PORT = settings["port"]
 GPIO_PORT = settings["gpio_addr"]["port"]
 GPIO_ADDR = settings["gpio_addr"]["addr"]
 
 PARAMS_FILE = "storage/temp_manager/params.yaml"
 
 ## Utils to manage params
+"""
+The params file is to save the params of the manager so that it can
+be restored on the next start.
+
+The params in the manager are not to be touched. The service should
+be stopped before the params are updated, both internal and file.
+"""
+
 @dataclass
 class Params:
     """Dataclass, represents the current parameters of the cooler."""
@@ -180,7 +187,8 @@ class TempManager:
             # TODO: extremely long tick time will freeze system.
             if self.stop_lock.locked():
                 self.stop_lock.release() # Return the signal
-                return
+                break
+        log("Cooling service ended.")
     
     def stop(self):
         """Stop the service gracefully.
@@ -196,9 +204,3 @@ def get_manager():
         sock_api.SockConn(GPIO_ADDR, GPIO_PORT)
     )
 
-## Running the manager
-manager = get_manager()
-manager.run()
-
-## TODO: Implement sock_api that allows fetching state & params, changing params
-## TODO: Implement sock_api that allows starting & stopping
