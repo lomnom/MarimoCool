@@ -20,6 +20,8 @@ def make_log(purpose: str) -> "function":
 
         purpose_str = purpose
         purpose_str = "\033[2;1m" + purpose + "\033[22;21m" # dim + bold
+
+        seperator = "\033[2m" + '>' + "\033[22m" # Dim >
         with log_lock:
-            print(timestamp, purpose_str, '>', *args, **kwargs)
+            print(timestamp, purpose_str, seperator, *args, **kwargs)
     return log

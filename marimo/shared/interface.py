@@ -138,9 +138,9 @@ class TankTemp(Sensor):
     TEMP_RE = re.compile(r"t=([0-9]+)") # Regex for temperature str
     def read(self) -> "float|None":
         """Read tank temperature sensor. Returns float, the temperature 
-        in C. Returns None if no temperature sensor."""
+        in C. Raises OSError if no temperature sensor."""
         if not self.data_file:
-            return None
+            raise OSError("No temperature sensor connected!")
 
         with open(self.data_file, "r") as data_file:
             data = data_file.read()
