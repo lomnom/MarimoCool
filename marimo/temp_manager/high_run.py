@@ -2,13 +2,7 @@
 This file is a higher-level runner for core_run which implements:
 1. Starting and stopping core_run
 2. Saving previous params to reuse on startup
-3. Exposing a sock_api that can:
-    - Start service
-    - Stop service
-    - Check if running
-    - Query State
-    - Query current Params
-    - Update params when service stopped
+3. Exposing a flask api that is used to control it.
 
 TODO: Error reporting, get last few errors & error when service crashes.
 """
@@ -27,35 +21,6 @@ import copy
 
 import shared.log as make_log
 log = make_log.make_log("temp-high")
-
-## Params file utils
-PARAMS_FILE = "storage/temp_manager/params.yaml"
-
-"""
-The params file is to save the params of the manager so that it can
-be restored on the next start.
-
-The params in the manager are not to be touched. The service should
-be stopped before the params are updated, both internal and file.
-"""
-
-def read_params_file() -> dict:
-    """Read the params file."""
-    # TODO: Start in halted state if params invalid.
-    with open(PARAMS_FILE) as file:
-        new_params = yaml_load(file)
-    return new_params
-
-PARAMS_HEADER = """# This is loaded on startup of temp_manager
-# Change the params thru the API when temp_manager is running.
-# API updates will also update this file
-"""
-
-def write_params_file(new_params: dict):
-    """Write params to the params file."""
-    written = PARAMS_HEADER + yaml_dump(new_params)
-    with open(PARAMS_FILE, 'w') as file:
-        file.write(written)
 
 ## Creation of the instance
 # -u --> unbuffered
@@ -129,7 +94,7 @@ class Instance:
 
             self.running = False
             self.instance_info = [None, None]
-            
+
             self.stdout_thread.join()
             self.stderr_thread.join()
     
@@ -196,28 +161,84 @@ class Instance:
 # The one instance object we will use.
 instance = Instance()
 
-# We start the instance started with the last run's saved params.
+## Params file utils
+PARAMS_FILE = "storage/temp_manager/params.yaml"
+
+"""
+The params file is to save the params of the manager so that it can
+be restored on the next start.
+
+The params in the manager are not to be touched. The service should
+be stopped before the params are updated, both internal and file.
+"""
+
+def read_params_file() -> dict:
+    """Read the params file."""
+    # TODO: Start in halted state if params invalid.
+    with open(PARAMS_FILE) as file:
+        new_params = yaml_load(file)
+    return new_params
+
+PARAMS_HEADER = """# This is loaded on startup of temp_manager
+# Change the params thru the API when temp_manager is running.
+# API updates will also update this file
+"""
+
+def write_params_file(new_params: dict):
+    """Write params to the params file."""
+    written = PARAMS_HEADER + yaml_dump(new_params)
+    with open(PARAMS_FILE, 'w') as file:
+        file.write(written)
+
+# We try to start the instance started with the last run's saved params.
 params = read_params_file()
-
-# We start the instance started with the last run's saved params.
-instance = Instance()
-input("Enter to continue")
-
 instance.start(params)
 
-input("Enter to continue")
+"""
+[Flask API schema]
 
-instance.exit()
+Start service: GET /start
+- Success
+  - 200: "ok"
+- Failure
+  - 409: "err: already running"
 
-input("Enter to continue")
+Stop service: GET /stop
+- Success
+  - 200 "ok"
+- Failure
+  - 409: "err: already stopped"
 
-instance.start(params)
+Check if running: GET /is_running
+- Success:
+  - 200 true | false
 
-input("Enter to continue")
+Query State: GET /state
+- Success:
+  - 200 {json with state} 
+- Failure:
+  - 409 "not running!"
 
-instance.exit()
+Query current Params: GET /params
+- Success:
+  - 200 {json with params}
+  - Returns internal saved yaml params, which are guaranteed to be synced with
+    the running instance (if there is one).
 
-print("Exiting...")
-del instance
+Update params when service stopped: POST /params
+- Request schema: {json with params}
+- Success:
+  - 200 "ok" 
+- Failure:
+  - 429 "err: not stopped!"
+"""
+from flask import Flask
 
-print(instance)
+app = Flask("temp_manager")
+
+# home route that returns below text when root url is accessed
+@app.route("/")
+def hello_world():
+    return "<p>Hello, World!</p>"
+
+app.run()
