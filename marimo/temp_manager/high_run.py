@@ -86,7 +86,9 @@ class Instance:
     
     def watchdog(self):
         """Watches the process and does cleanup on crash.
-        Any non-zero exit code is considered a crash."""
+        Any non-zero exit code is considered a crash.
+        NOTE: Assumes zero exit code can only be induced by .exit() or a 
+        ctrl-c to the whole program."""
         return_code = self.proc.wait()
         if return_code != 0:
             log(f"Process crashed with return code {return_code}!!!!!")
@@ -97,6 +99,8 @@ class Instance:
 
             self.stdout_thread.join()
             self.stderr_thread.join()
+
+            log(f"Cleaned up.")
     
     def start(self, params: dict):
         """Start the instance with given params."""
@@ -122,6 +126,7 @@ class Instance:
             text = True,
             encoding = "ascii", # Standardised.
             # We do not need to set bufsize as -u specified alreday.
+            start_new_session=True # Prevents ctrl-c from propagating.
         )
 
         self.stdout_thread = threading.Thread(
@@ -144,15 +149,20 @@ class Instance:
         if not self.running:
             raise RuntimeError("Instance not running!")
 
+        log("Stopping core_run...")
         self.running = False
-        self.instance_info = [None, None]
 
         self.proc.send_signal(signal.SIGINT) # Ctrl-c to core_run
         self.proc.wait() # Wait for procs to end
 
+        log("Cleaning threads...")
         self.stdout_thread.join()
         self.stderr_thread.join()
         self.watch_thread.join()
+
+        self.instance_info = [None, None]
+
+        log("Done.")
     
     def __del__(self):
         if self.running:
@@ -194,7 +204,7 @@ def write_params_file(new_params: dict):
 params = read_params_file()
 instance.start(params)
 
-"""
+doc = """
 [Flask API schema]
 
 Start service: GET /start
@@ -234,11 +244,15 @@ Update params when service stopped: POST /params
 """
 from flask import Flask
 
-app = Flask("temp_manager")
+app = Flask("temp_manager", root_path="./")
 
 # home route that returns below text when root url is accessed
 @app.route("/")
-def hello_world():
-    return "<p>Hello, World!</p>"
+def docs_route():
+    return doc
 
-app.run()
+app.run(host='0.0.0.0', port = PORT)
+
+log("Shutting down...")
+if instance.running:
+    instance.exit()

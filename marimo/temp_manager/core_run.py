@@ -203,7 +203,7 @@ class TempManager:
             raise RuntimeError("An instance of manager is running already!")
 
         log(f"Cooling service started. Params={asjson(self.params)}")
-        out_pipe(f"params;<{asjson(self.params)}>")
+        out_pipe(f"params;{asjson(self.params)}")
         self.state = State(**asdict(self.initial_state))
 
         while True:
@@ -284,8 +284,6 @@ def get_manager():
 
 manager = get_manager()
 log(f"Using params {manager.params}") 
-
-raise ValueError("Too gay.")
 
 thread = threading.Thread(
     target = manager.run
