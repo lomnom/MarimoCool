@@ -6,18 +6,23 @@ The temp_manager service is responsible for controlling fan & peltier to
 regulate tank temperature within a specific temperature range.
 
 Messages to stderr are sent, where each output is prefixed by
-5 digits, the number of bytes of UTF-8 it is, like so:
-00004Nya
-00012hello world![EOF]
+5 digits, the number of characters of ascii it is, followed by a newline like so:
+00003Nya
+00011hello world!
 
 The brackets <> are included in these outputs.
-- "params; <dict>" is sent on startup to show what parameters are used.
+- "params;<json>" is sent on startup to show what parameters are used.
 - Within a single tick, in this order:
     - "running" when a tick is started
-    - "peltier_fail; <err>" If an exception occurs during peltier tick
-    - "fan_fail; <err>" if an exception occurs during fan tick.
-    - "state; <state>" printed after every tick to show state.
+    - "peltier_fail;<err>" If an exception occurs during peltier tick
+    - "fan_fail;<err>" if an exception occurs during fan tick.
+    - "state;<json>" printed after every tick to show state.
     - "done" after the tick is done
+- "ended" when program exits gracefully.
+
+Outputs are always one of these
+- type;info
+- type
 
 Run this program as python3 -m temp_manager.core_run [low] [high] [fan_retain] [tick_time]
 Where all square brackets are floats.
@@ -31,7 +36,7 @@ from dataclasses import dataclass, asdict
 from enum import Enum
 
 import shared.log as make_log
-log = make_log.make_log("temp-manager")
+log = make_log.make_log("temp-core")
 import shared.sock_api as sock_api
 
 from yaml import safe_load as yaml_load
@@ -40,13 +45,22 @@ with open("storage/temp_manager/settings.yaml") as file:
 GPIO_PORT = settings["gpio_addr"]["port"]
 GPIO_ADDR = settings["gpio_addr"]["addr"]
 
+import json
+def asjson(item: dataclass):
+    """asdict() but with json.
+    Handles enums by serialising their name"""
+    return json.dumps(asdict(item), default=lambda enum: enum.name)
+
 from sys import argv, stderr
 def out_pipe(output: str):
     """Print output to stderr in standard format."""
     if type(output) is not str:
         raise TypeError("Must supply string to out_pipe!")
 
-    output = output.encode("utf-8")
+    try:
+        output = output.encode("ascii")
+    except UnicodeEncodeError:
+        raise ValueError("out_pipe messages must be ascii!")
 
     length = len(output)
     if length > 99999:
@@ -54,7 +68,7 @@ def out_pipe(output: str):
     length = str(length).zfill(5)
     length = length.encode("ascii")
 
-    stderr.buffer.write(length + output)
+    stderr.buffer.write(length + output + b'\n')
     stderr.buffer.flush()
 
 ## Utils to manage params
@@ -67,7 +81,7 @@ class Params:
     tick_time: float
 
 ## Actual manager
-class Phase(Enum):
+class Phase(Enum): # enum.
     cool = 1
     idle = 2
 
@@ -167,7 +181,7 @@ class TempManager:
             peltier_fail = None
         except Exception as e:
             log(f"Peltier tick failed with {repr(e)}")
-            out_pipe(f"peltier_fail; <{repr(e)}>")
+            out_pipe(f"peltier_fail;<{repr(e)}>")
             peltier_fail = e
         
         try:
@@ -175,7 +189,7 @@ class TempManager:
             fan_fail = None
         except Exception as e:
             log(f"Fan tick failed with {repr(e)}")
-            out_pipe(f"fan_fail; <{repr(e)}>")
+            out_pipe(f"fan_fail;<{repr(e)}>")
             fan_fail = e
         
         return (peltier_fail, fan_fail)
@@ -188,8 +202,8 @@ class TempManager:
             # Only ONE run instance can exist at any time.
             raise RuntimeError("An instance of manager is running already!")
 
-        log(f"Cooling service started. Params={self.params}")
-        out_pipe(f"params; <{self.params}>")
+        log(f"Cooling service started. Params={asjson(self.params)}")
+        out_pipe(f"params;<{asjson(self.params)}>")
         self.state = State(**asdict(self.initial_state))
 
         while True:
@@ -198,7 +212,7 @@ class TempManager:
 
             result = self.tick()
 
-            out_pipe(f"state; {self.state}")
+            out_pipe(f"state;{asjson(self.state)}")
             out_pipe(f"done")
 
             elapsed = time.perf_counter() - start
@@ -271,6 +285,8 @@ def get_manager():
 manager = get_manager()
 log(f"Using params {manager.params}") 
 
+raise ValueError("Too gay.")
+
 thread = threading.Thread(
     target = manager.run
 )
@@ -283,3 +299,4 @@ except KeyboardInterrupt:
     manager.stop()
     thread.join()
     log("Ended.")
+    out_pipe("ended")
