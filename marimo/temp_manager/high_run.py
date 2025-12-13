@@ -79,10 +79,11 @@ class Instance:
     
     def stdout_stream(self, pipe):
         """Reads data from stdout pipe.
-        Terminates when pipe closes."""
+        Terminates when pipe closes.
+        Forwards messages in stdout."""
         for data in iter(pipe.readline, ""):
             data = data[:-1] # Remove trailing newline.
-            log(f"Stdout data received: {data}")
+            log(f"Fw: {data}")
     
     def watchdog(self):
         """Watches the process and does cleanup on crash.
@@ -149,7 +150,7 @@ class Instance:
         if not self.running:
             raise RuntimeError("Instance not running!")
 
-        log("Stopping core_run...")
+        log("Stopping core_run (wait a few seconds)...")
         self.running = False
 
         self.proc.send_signal(signal.SIGINT) # Ctrl-c to core_run
@@ -201,33 +202,35 @@ def write_params_file(new_params: dict):
         file.write(written)
 
 # We try to start the instance started with the last run's saved params.
-params = read_params_file()
-instance.start(params)
+instance.start(
+    read_params_file()
+)
 
 doc = """
 [Flask API schema]
+409 code: Conflict with current resource state.
 
-Start service: GET /start
+Start service: POST /start
 - Success
-  - 200: "ok"
+  - 204 (no content)
 - Failure
-  - 409: "err: already running"
+  - 409 {"err": "already running"}
 
-Stop service: GET /stop
+Stop service: POST /stop
 - Success
-  - 200 "ok"
+  - 204 (no content)
 - Failure
-  - 409: "err: already stopped"
+  - 409 {"err": "already stopped"}
 
 Check if running: GET /is_running
 - Success:
-  - 200 true | false
+  - 200 {"running": true | false}
 
 Query State: GET /state
 - Success:
   - 200 {json with state} 
 - Failure:
-  - 409 "not running!"
+  - 404 {"err": "undefined instance state when instance not running!"}
 
 Query current Params: GET /params
 - Success:
@@ -235,24 +238,106 @@ Query current Params: GET /params
   - Returns internal saved yaml params, which are guaranteed to be synced with
     the running instance (if there is one).
 
-Update params when service stopped: POST /params
+Set params when service stopped: PUT /params
 - Request schema: {json with params}
 - Success:
-  - 200 "ok" 
+  - 204 (no content)
 - Failure:
-  - 429 "err: not stopped!"
+  - 409 {"err": "not stopped!"}
+  - 400 {"err": "<reason why provided params are invalid.>"}
+
+Web endpoint at /docs with this documentation. Root redirects to /docs
 """
-from flask import Flask
+from flask import Flask, make_response, redirect, request, jsonify
 
 app = Flask("temp_manager", root_path="./")
 
-# home route that returns below text when root url is accessed
 @app.route("/")
+def root_route():
+    """
+    It is an API, so we redirect to docs.
+    """
+    return redirect("/docs")
+
+@app.route("/docs")
 def docs_route():
-    return doc
+    """
+    Route which sends documentation over.
+    """
+    resp = make_response(doc, 200)
+    resp.mimetype = "text/plain"
+    return resp
+
+@app.route("/start", methods = ["POST"])
+def start_route():
+    """
+    Route to start the instance.
+    """
+    if instance.running:
+        return jsonify(err = "already running"), 409
+    
+    params = read_params_file()
+    instance.start(params)
+    return '', 204
+
+@app.route("/stop", methods = ["POST"])
+def stop_route():
+    """
+    Route to stop the instance.
+    """
+    if not instance.running:
+        return jsonify(err = "already stopped"), 409
+    
+    instance.exit()
+    return '', 204
+
+@app.route("/is_running", methods = ["GET"])
+def is_running_route():
+    """
+    Route to check if instance running.
+    """
+    return jsonify(running = instance.running), 200
+
+@app.route("/state", methods = ["GET"])
+def get_state_route():
+    """
+    Route to get instance State (when running).
+    """
+    if not instance.running:
+        return jsonify(
+            err = "undefined instance state when instance not running!"
+        ), 404
+    
+    params, state = instance.live_info()
+    return jsonify(state), 200
+
+@app.route("/params", methods = ["GET"])
+def get_params_route():
+    """
+    Route to get instance Params.
+    """
+    params = read_params_file()
+    return jsonify(params), 200
+
+@app.route("/params", methods = ["PUT"])
+def set_params_route():
+    """
+    Route to set instance Params.
+    Only works if instance is stopped.
+    """
+    if instance.running:
+        return jsonify(err = "not stopped!"), 409
+    
+    new_params = request.json
+
+    # TODO: Validate params.
+
+    write_params_file(new_params)
+    return '', 204
 
 app.run(host='0.0.0.0', port = PORT)
 
 log("Shutting down...")
+
 if instance.running:
     instance.exit()
