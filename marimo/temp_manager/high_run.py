@@ -154,6 +154,7 @@ class Instance:
                 info = self.stderr_reject # Would contain exception.
             )
     
+    param_keys = ["low", "high", "fan_retain", "tick_time"]
     def start(self, params: dict):
         """Start the instance with given params."""
         if self.running:
@@ -164,10 +165,7 @@ class Instance:
         command = BASE_COMMAND
 
         args = [
-            params["low"],
-            params["high"],
-            params["fan_retain"],
-            params["tick_time"]
+            params[key] for key in self.param_keys
         ]
         args = [str(arg) for arg in args]
 
@@ -404,7 +402,17 @@ def set_params_route():
     
     new_params = request.json
 
-    # TODO: Validate params.
+    # NOTE: Minimal functional validation!
+    if not isinstance(new_params, dict):
+        return jsonify(err="invalid json!"), 400
+
+    for key in instance.param_keys:
+        if key not in new_params.keys():
+            return jsonify(err = f"params needs key {key}!"), 400
+    
+    for key in new_params.keys():
+        if key not in instance.param_keys:
+            return jsonify(err = f"params has extra key {key}!"), 400
 
     write_params_file(new_params)
     return '', 204
