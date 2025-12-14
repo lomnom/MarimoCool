@@ -97,7 +97,7 @@ class TempManager:
     temperature.
 
     The system has two phases, cool and idle.
-    -> The system starts at cool
+    -> The system starts at idle
     -> When cool:
     - Peltier is on
     - If the temperature < low, change to "idle".
@@ -194,7 +194,7 @@ class TempManager:
         
         return (peltier_fail, fan_fail)
     
-    initial_state = State(phase = Phase.cool, last_peltier_on = 0)
+    initial_state = State(phase = Phase.idle, last_peltier_on = 0)
     def run(self):
         """Run the service. Stop with .stop().
         Never ever change params when running."""
