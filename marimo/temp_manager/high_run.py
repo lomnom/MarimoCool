@@ -293,7 +293,7 @@ Check instance status: GET /status
     "running": true | false,
     "since": <unix_time> | null if never_started,
     "reason": "never_started" | "started" | "stopped" | "crashed",
-    "info": null | {"error": "<err>"} if crashed
+    "info": null | "<err>" if crashed
   }
 
 Query State: GET /state
