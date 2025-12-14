@@ -3,8 +3,6 @@ This file is a higher-level runner for core_run which implements:
 1. Starting and stopping core_run
 2. Saving previous params to reuse on startup
 3. Exposing a flask api that is used to control it.
-
-TODO: Error reporting, get last few errors & error when service crashes.
 """
 
 from yaml import dump as yaml_dump
@@ -18,6 +16,19 @@ import threading
 import signal
 import json
 import copy
+from datetime import datetime
+from datetime import UTC as tz_UTC
+from dataclasses import dataclass, asdict
+from typing import Literal
+
+def unix_time_now() -> int:
+    """
+    Returns the current unix timestamp.
+    src: https://stackoverflow.com/questions/66393752/get-unix-time-in-python
+    """
+    return round(
+        (datetime.now(tz_UTC) - datetime(1970, 1, 1, tzinfo = tz_UTC)).total_seconds()
+    )
 
 import shared.log as make_log
 log = make_log.make_log("temp-high")
@@ -26,20 +37,52 @@ log = make_log.make_log("temp-high")
 # -u --> unbuffered
 BASE_COMMAND = ["python3", "-u", "-m", "temp_manager.core_run"]
 
+@dataclass
+class RunInfo:
+    """
+    Dataclass which represents additional information about the current status.
+    """
+    # We have been running/stopped since this time, None if never started.
+    since: int | None 
+
+    # Reason for current running/stopped state.
+    reason: Literal["never_started", "started", "stopped", "crashed"] 
+
+    info: str | None # "<err>" if crash
+
 class Instance:
     """Represents an instance of core_run. 
+    TODO: Handle non-fatal errors.
+
     Attributes: 
     - self.running --> If it is running.
-    TODO: Error reporting."""
+    - self.run_info --> RunInfo about current status.
+
+    Probably the most complicated state & logic in the whole 
+    temp_manager ngl. Complexity seems to be needed as we need live updates
+    and robust instance management.
+    """
     def __init__(self):
+        # running contains if instance is running, run_info
+        # contains info about why we are running or stopped.
         self.running = False
+        self.run_info = RunInfo(
+            since = None,
+            reason = "never_started",
+            info = None
+        )
 
         self.instance_info = [None, None] # live [params, state] when running.
-        self.info_lock = threading.Lock()
+        self.info_lock = threading.Lock() # Lock for accessinf instance_info
+
+        # Captures all malformatted output to stderr.
+        # Resets to "" on every start.
+        self.stderr_reject = ""
 
     def handle_packet(self, data: str):
         """
         Handle a packet sent thru stderr.
+        TODO: Handle peltier_fail and fan_fail
         """
         with self.info_lock:
             kind, _, info = data.partition(";")
@@ -67,7 +110,9 @@ class Instance:
         Terminates when pipe closes."""
         for data in iter(pipe.readline, ""):
             if len(data) < 5 or not data[:5].isnumeric():
-                continue # TODO: Handle, likely exception.
+                # Malformatted stderr, not a packet.
+                self.stderr_reject += data
+                continue
 
             length, content = data[:5], data[5:]
             length = int(length)
@@ -102,6 +147,12 @@ class Instance:
             self.stderr_thread.join()
 
             log(f"Cleaned up.")
+
+            self.run_info = RunInfo(
+                since = unix_time_now(),
+                reason = "crashed",
+                info = self.stderr_reject # Would contain exception.
+            )
     
     def start(self, params: dict):
         """Start the instance with given params."""
@@ -134,6 +185,7 @@ class Instance:
             target=self.stdout_stream, 
             args=(self.proc.stdout,)
         )
+        self.stderr_reject = "" # Reset reject cache.
         self.stderr_thread = threading.Thread(
             target=self.stderr_stream, 
             args=(self.proc.stderr,)
@@ -144,6 +196,12 @@ class Instance:
         self.watch_thread.start()
         self.stdout_thread.start()
         self.stderr_thread.start()
+
+        self.run_info = RunInfo(
+            since = unix_time_now(),
+            reason = "started",
+            info = None
+        )
     
     def exit(self):
         """Stops the instance. Blocks till a full exit."""
@@ -163,9 +221,18 @@ class Instance:
 
         self.instance_info = [None, None]
 
+        self.run_info = RunInfo(
+            since = unix_time_now(),
+            reason = "stopped",
+            info = None
+        )
+
         log("Done.")
     
     def __del__(self):
+        """
+        Last resort cleanup. Pls do .exit() if possible.
+        """
         if self.running:
             self.exit()
 
@@ -222,9 +289,14 @@ Stop service: POST /stop
 - Failure
   - 409 {"err": "already stopped"}
 
-Check if running: GET /is_running
+Check instance status: GET /status
 - Success:
-  - 200 {"running": true | false}
+  - 200 {
+    "running": true | false,
+    "since": <unix_time> | null if never_started,
+    "reason": "never_started" | "started" | "stopped" | "crashed",
+    "info": null | {"error": "<err>"} if crashed
+  }
 
 Query State: GET /state
 - Success:
@@ -291,12 +363,14 @@ def stop_route():
     instance.exit()
     return '', 204
 
-@app.route("/is_running", methods = ["GET"])
+@app.route("/status", methods = ["GET"])
 def is_running_route():
     """
-    Route to check if instance running.
+    Route to get system status.
     """
-    return jsonify(running = instance.running), 200
+    status = asdict(instance.run_info)
+    status = {"running": instance.running, **status}
+    return jsonify(status), 200
 
 @app.route("/state", methods = ["GET"])
 def get_state_route():
