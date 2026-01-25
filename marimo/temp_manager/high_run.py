@@ -23,7 +23,7 @@ from typing import Literal
 
 def unix_time_now() -> int:
     """
-    Returns the current unix timestamp.
+    Returns the current unix timestamp. Rounded to nearest second.
     src: https://stackoverflow.com/questions/66393752/get-unix-time-in-python
     """
     return round(
