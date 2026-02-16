@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+
+{% block title %}Temperature{% endblock %}
+
+{% block contents %}
+    <h1>
+        Temperature
+    </h1>
+
+    <strong>Tank temperature: </strong> {{temp}}C <br />
+
+    <strong>Status: </strong> 
+    {% if running %}
+        running
+    {% else %}
+        stopped
+    {% endif %}
+    <i>since</i> {{status_change}}  <br />
+
+    {% if running %}
+        <strong>Cooling phase: </strong> {{phase}}  <br />
+    {% else %}
+        <strong>Stopped reason: </strong> {{reason}}  <br />
+    {% endif %}
+
+    <br />
+{% endblock %}
