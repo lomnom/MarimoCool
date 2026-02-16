@@ -42,25 +42,27 @@ def index():
     except requests.exceptions.ConnectionError:
         return render_template("down.html", message = "temp_manager unreachable!")
 
-    timestamp = datetime.fromtimestamp(status["since"])
-    since = timestamp.strftime("%Y-%m-%d %H:%M:%S")
+    if status["since"]:
+        timestamp = datetime.fromtimestamp(status["since"])
+        since = timestamp.strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        since = "never" # never_started
+
+    extra_params = {}
 
     if status["running"]:
         state = requests.get(manager_url + "/state").json()
-        return render_template(
-            "index.html", 
-            temp = temp, 
-            running = status["running"],
-            status_change = since,
-            phase = state["phase"]
-        )
-    else:
-        return render_template(
-            "index.html", 
-            temp = temp, 
-            running = status["running"],
-            status_change = since,
-            reason = status["info"]
-        )
+        extra_params["phase"] = state["phase"]
+    elif status["reason"] == "crashed":
+        extra_params["error"] = status["info"]
+
+    return render_template(
+        "index.html", 
+        temp = temp, 
+        running = status["running"],
+        status_change = since,
+        reason = status["reason"],
+        **extra_params
+    )
 
 app.run("0.0.0.0", port=settings["port"])

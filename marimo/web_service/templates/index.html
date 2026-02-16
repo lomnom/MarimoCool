@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 
-{% block title %}Temperature{% endblock %}
+{% block title %}Marimo Status{% endblock %}
 
 {% block contents %}
     <h1>
-        Temperature
+        Marimo Status
     </h1>
 
     <strong>Tank temperature: </strong> {{temp}}C <br />
@@ -14,13 +14,16 @@
         running
     {% else %}
         stopped
-    {% endif %}
-    <i>since</i> {{status_change}}  <br />
+    {% endif %} <br />
+    <strong>Reason: </strong> {{reason}} at {{status_change}} <br />
 
     {% if running %}
         <strong>Cooling phase: </strong> {{phase}}  <br />
-    {% else %}
-        <strong>Stopped reason: </strong> {{reason}}  <br />
+    {% endif %}
+
+
+    {% if error %}
+        <strong>Crash log: </strong> {{error}}  <br />
     {% endif %}
 
     <br />
