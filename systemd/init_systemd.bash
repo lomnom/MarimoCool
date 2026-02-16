@@ -1,7 +1,7 @@
 #!/bin/bash
 
 echo "Please run this INSIDE THE SYSTEMD DIRECTORY!"
-echo "Press enter if you it is true."
+echo "Press enter if the above is true."
 read
 
 echo "Sudo may be needed."
