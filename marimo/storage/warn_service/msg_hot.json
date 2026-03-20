@@ -1,0 +1,15 @@
+{
+  "content": null,
+  "embeds": [
+    {
+      "title": "Hot!! :fire_extinguisher::fire::fire:",
+      "description": "Temperature is above 24°C!",
+      "color": 13565952,
+      "author": {
+        "name": "TankBot",
+        "icon_url": "https://preview.redd.it/if-possible-how-to-quarantine-moss-balls-from-an-online-v0-sthbeeci30rc1.png?width=511&format=png&auto=webp&s=c379d568b5fc72ec2c14ace17b262c2531cbda63"
+      }
+    }
+  ],
+  "attachments": []
+}
