@@ -4,7 +4,7 @@ Password: blubblubball
 
 Ip found with `sudo nmap -sn --disable-arp-ping -R 192.168.50.0/24`.
 
-Ip: 192.168.50.17
+Ip: 192.168.50.230
 
 ## Temperature sensor
 Tutorial: [link](https://pimylifeup.com/raspberry-pi-temperature-sensor/)
