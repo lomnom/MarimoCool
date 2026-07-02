@@ -148,7 +148,11 @@ def index():
             bar = reading
         else:
             info = f"{reading}°C"
-            bar = round((reading - graph_low)/graph_division) * graph_char
+            ticks = round((reading - graph_low)/graph_division)
+            if ticks < 0:
+                bar = "🥶"
+            else:
+                bar = ticks * graph_char
             
         entries.append(
             ['[', time_str, '⏐', info, ']', bar]
