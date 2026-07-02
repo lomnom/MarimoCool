@@ -124,7 +124,11 @@ class TempManager:
         """Makes a request to GPIOService. Raises RuntimeError
         if internal error faced in GPIOService. Raises sock_api.ClosedException
         if unreachable."""
-        response = self.server_conn.request(body)
+        try:
+            response = self.server_conn.request(body)
+        except Exception as e:
+            raise RuntimeError(f"Could not reach GPIOService: {repr(e)}")
+
         if type(response) is str and response.startswith("Internal error"):
             raise RuntimeError(f"GPIOService server error: {response}")
         return response

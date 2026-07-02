@@ -2,8 +2,8 @@
   "content": null,
   "embeds": [
     {
-      "title": "Hot!! (>%s°C) :fire_extinguisher::fire::fire:",
-      "description": "Temperature is %s°C!",
+      "title": "Error!! :face_with_spiral_eyes::grey_question::skull:",
+      "description": "%s\n**Logs:** %s",
       "color": 13565952,
       "author": {
         "name": "TankBot",

@@ -140,12 +140,14 @@ class TankTemp(Sensor):
         """Read tank temperature sensor. Returns float, the temperature 
         in C. Raises OSError if no temperature sensor."""
         if not self.data_file:
-            raise OSError("No temperature sensor connected!")
+            raise OSError("No temperature sensor connected! (No data file.)")
 
         with open(self.data_file, "r") as data_file:
             data = data_file.read()
         
         result = self.TEMP_RE.search(data)
+        if result is None:
+            raise OSError(f"Cannot read temperature! (Invalid data in file: {data})")
         return float(result.group(1)) / 1000
 
 ### Exported sensors & devices

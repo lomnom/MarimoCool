@@ -2,8 +2,8 @@
   "content": null,
   "embeds": [
     {
-      "title": "Cool  :ice_cube::snowflake:",
-      "description": "Temperature is 24°C or cooler :3",
+      "title": "Cool (<=%s°C) :ice_cube::snowflake:",
+      "description": "Temperature is %s°C :3",
       "color": 53183,
       "author": {
         "name": "TankBot",
