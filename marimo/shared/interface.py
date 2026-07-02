@@ -147,7 +147,7 @@ class TankTemp(Sensor):
         
         result = self.TEMP_RE.search(data)
         if result is None:
-            raise OSError(f"Cannot read temperature! (Invalid data in file: {data})")
+            raise OSError(f"Cannot read temperature! (Invalid data in file: '{data}')")
         return float(result.group(1)) / 1000
 
 ### Exported sensors & devices

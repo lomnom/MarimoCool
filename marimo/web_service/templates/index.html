@@ -7,13 +7,29 @@
         Marimo Status
     </h1>
 
-    <strong>Tank temperature: </strong> {{temp}}C <br />
+    <strong>Tank temperature: </strong> {{temp}}°C <br />
 
     <strong>Status: </strong> 
     {% if running %}
-        running
+        running →
+        <button class="inline-button" onclick="
+            fetch(location.protocol + '//' + location.hostname + ':5001/stop', {
+                method: 'POST'
+            });
+            setTimeout(() => location.reload(), 3000);
+        ">
+            press to stop
+        </button>
     {% else %}
-        stopped
+        stopped →
+        <button class="inline-button" onclick="
+            fetch(location.protocol + '//' + location.hostname + ':5001/start', {
+                method: 'POST'
+            });
+            setTimeout(() => location.reload(), 3000);
+        ">
+            press to start
+        </button>
     {% endif %} <br />
     <strong>Reason: </strong> {{reason}} at {{status_change}} <br />
 
@@ -21,10 +37,21 @@
         <strong>Cooling phase: </strong> {{phase}}  <br />
     {% endif %}
 
-
     {% if error %}
         <strong>Crash log: </strong> {{error}}  <br />
     {% endif %}
 
     <br />
+    <strong>Logs: </strong> <br />
+    <table>
+        {% for row in history %}
+            <tr>
+                {% for item in row %}
+                    <td>
+                        {{item}}
+                    </td>
+                {% endfor %}
+            </tr>
+        {% endfor %}
+    </table>
 {% endblock %}

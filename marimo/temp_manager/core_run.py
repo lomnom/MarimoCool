@@ -245,6 +245,10 @@ class TempManager:
         if self.is_running():
             self.stop_lock.acquire() # Signal
             self.stop_lock.acquire() # Wait for returned signal
+
+            # Reset peripherals to all off on halt.
+            self.gpio_req({"name": "fan", "operation": "turn_off"})
+            self.gpio_req({"name": "peltier", "operation": "turn_off"})
             log("Cooling service ended")
 
 def get_params() -> Params:

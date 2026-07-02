@@ -1,6 +1,6 @@
 /* Largen size of everything on mobile */
 @media (max-width: 1000px) {
-  html {
+  body {
     transform: scale(1.5);
     transform-origin: top left;
   }
@@ -35,4 +35,13 @@ a {
 
 .nav {
   margin: 10px 0 10px;
+}
+
+/* For the start/stop button */
+.inline-button {
+  border: none;
+  display: inline;
+  border-radius: 3px; /* smaller corners */
+  padding: 4px 10px;
+  cursor: pointer;
 }

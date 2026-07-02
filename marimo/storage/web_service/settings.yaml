@@ -5,3 +5,12 @@ temp_manager:
   port: 5001 # Where temp_manager is running
   addr: "0.0.0.0"
 port: 5002
+
+history:
+  per_sample: 1 # 1 minute between each sample
+  n_samples: 60 # Keep last 120 samples
+
+graph:
+  low: 18
+  division: 0.0625 # 1/16, sensor native accuracy
+  char: "·"
