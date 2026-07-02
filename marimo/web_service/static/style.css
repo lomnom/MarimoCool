@@ -1,11 +1,3 @@
-/* Largen size of everything on mobile */
-@media (max-width: 1000px) {
-  body {
-    transform: scale(1.5);
-    transform-origin: top left;
-  }
-}
-
 /* Jinja documentation style lol */
 
 h1, h2, h3, h4, h5, h6 {
@@ -44,4 +36,22 @@ a {
   border-radius: 3px; /* smaller corners */
   padding: 4px 10px;
   cursor: pointer;
+}
+
+/* Prevent ugly browser defaults. */
+table {
+  font: inherit;
+}
+
+button {
+  font: inherit;
+  font-size: 85%;
+}
+
+/* Enlarge size of text & add back padding on mobile */
+@media (max-width: 1000px) {
+  body { 
+    font-size: 2.5rem; 
+    margin-left: 50px;
+  }
 }
